@@ -9,7 +9,6 @@ from __future__ import annotations
 import os
 from io import BytesIO
 from pathlib import Path
-from zipfile import ZIP_DEFLATED, ZipFile
 
 from flask import Flask, flash, redirect, render_template_string, request, send_file, url_for
 from werkzeug.utils import secure_filename
@@ -52,7 +51,7 @@ HTML_TEMPLATE = """
 <body>
   <div class="container">
     <h1>✦ Gemini Watermark Remover</h1>
-    <p class="note">Upload nhiều ảnh cùng lúc, hệ thống sẽ xử lý và trả về file ZIP kết quả.</p>
+    <p class="note">Upload ảnh và tải về ảnh đã xóa watermark ngay.</p>
 
     {% with messages = get_flashed_messages(with_categories=true) %}
       {% if messages %}
@@ -66,8 +65,8 @@ HTML_TEMPLATE = """
 
     <form method="post" action="{{ url_for('process_images') }}" enctype="multipart/form-data">
       <div class="field">
-        <label for="images">Ảnh đầu vào</label>
-        <input id="images" name="images" type="file" multiple required>
+        <label for="image">Ảnh đầu vào</label>
+        <input id="image" name="image" type="file" required>
       </div>
 
       <div class="row">
@@ -115,74 +114,60 @@ def home():
 
 @app.post("/process")
 def process_images():
-  files = request.files.getlist("images")
-  if not files:
-    flash("Vui lòng chọn ít nhất 1 ảnh.", "error")
-    return redirect(url_for("home"))
+    uploaded_file = request.files.get("image")
+    if not uploaded_file or not uploaded_file.filename:
+        flash("Vui lòng chọn 1 ảnh.", "error")
+        return redirect(url_for("home"))
 
-  suffix = request.form.get("suffix", "_clean").strip() or "_clean"
-  output_mode = (request.form.get("output_mode") or "original").strip().lower()
-  convert_webp = output_mode == "webp"
+    original_name = secure_filename(uploaded_file.filename)
+    if not original_name or not _is_supported(original_name):
+        flash("Định dạng ảnh không được hỗ trợ.", "error")
+        return redirect(url_for("home"))
 
-  try:
-    alpha_scale = float(request.form.get("alpha_scale", "1.0"))
-  except ValueError:
-    flash("Alpha scale không hợp lệ.", "error")
-    return redirect(url_for("home"))
+    suffix = request.form.get("suffix", "_clean").strip() or "_clean"
+    output_mode = (request.form.get("output_mode") or "original").strip().lower()
+    convert_webp = output_mode == "webp"
 
-  alpha_scale = max(0.5, min(3.0, alpha_scale))
+    try:
+        alpha_scale = float(request.form.get("alpha_scale", "1.0"))
+    except ValueError:
+        flash("Alpha scale không hợp lệ.", "error")
+        return redirect(url_for("home"))
 
-  zip_buffer = BytesIO()
-  processed = 0
+    alpha_scale = max(0.5, min(3.0, alpha_scale))
 
-  with ZipFile(zip_buffer, mode="w", compression=ZIP_DEFLATED) as output_zip:
-    for uploaded_file in files:
-      if not uploaded_file or not uploaded_file.filename:
-        continue
-
-      original_name = secure_filename(uploaded_file.filename)
-      if not original_name or not _is_supported(original_name):
-        continue
-
-      try:
+    try:
         cleaned = remove_watermark(uploaded_file.read(), alpha_scale=alpha_scale)
-      except Exception:
-        continue
+    except Exception as exc:
+        flash(f"Lỗi xử lý ảnh: {exc}", "error")
+        return redirect(url_for("home"))
 
-      src_path = Path(original_name)
-      output_ext = ".webp" if convert_webp else src_path.suffix.lower()
-      output_name = f"{src_path.stem}{suffix}{output_ext}"
+    src_path = Path(original_name)
+    output_ext = ".webp" if convert_webp else src_path.suffix.lower()
+    output_name = f"{src_path.stem}{suffix}{output_ext}"
 
-      image_buffer = BytesIO()
-      if convert_webp:
+    image_buffer = BytesIO()
+    if convert_webp:
         cleaned.save(image_buffer, format="WEBP", quality=WEBP_QUALITY, method=6)
-      else:
+    else:
         format_map = {
-          ".jpg": "JPEG",
-          ".jpeg": "JPEG",
-          ".png": "PNG",
-          ".bmp": "BMP",
-          ".tiff": "TIFF",
-          ".webp": "WEBP",
+            ".jpg": "JPEG",
+            ".jpeg": "JPEG",
+            ".png": "PNG",
+            ".bmp": "BMP",
+            ".tiff": "TIFF",
+            ".webp": "WEBP",
         }
         save_format = format_map.get(output_ext, "PNG")
         cleaned.save(image_buffer, format=save_format)
 
-      image_buffer.seek(0)
-      output_zip.writestr(output_name, image_buffer.read())
-      processed += 1
-
-  if processed == 0:
-    flash("Không có ảnh hợp lệ để xử lý.", "error")
-    return redirect(url_for("home"))
-
-  zip_buffer.seek(0)
-  return send_file(
-    zip_buffer,
-    as_attachment=True,
-    download_name="watermark_removed.zip",
-    mimetype="application/zip",
-  )
+    image_buffer.seek(0)
+    return send_file(
+        image_buffer,
+        as_attachment=True,
+        download_name=output_name,
+        mimetype="image/png" if output_ext == ".png" else "image/jpeg" if output_ext in (".jpg", ".jpeg") else "image/webp" if output_ext == ".webp" else "image/bmp",
+    )
 
 
 if __name__ == "__main__":

@@ -64,11 +64,10 @@ http://127.0.0.1:5000
 ```
 
 Web app hỗ trợ:
-- Upload nhiều ảnh cùng lúc
-- Chỉnh `alpha_scale`
-- Đổi hậu tố file đầu ra
-- Chọn đầu ra: giữ nguyên định dạng/kích thước (mặc định) hoặc xuất WebP
-- Tải toàn bộ kết quả dưới dạng ZIP
+- Upload ảnh và tải về ngay (không qua ZIP)
+- Chỉnh `alpha_scale` để điều chỉnh độ xóa watermark
+- Đổi hậu tố tên file đầu ra
+- Chọn định dạng: giữ nguyên (mặc định) hoặc xuất WebP
 
 ### As a Library
 
